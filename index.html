@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Bassins scolaires des écoles primaires de la région de Montréal</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.locatecontrol/dist/L.Control.Locate.min.css" />
+    
+    <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+    <a href="#panel-content" class="skip-link">Aller au panneau d'information</a>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Activer le mode sombre" aria-pressed="false">🌙 Mode sombre</button>
+    <main id="main-content">
+    <div id="map" role="region" aria-label="Carte des bassins scolaires"></div>
+    <div id="welcome-modal" class="welcome-modal open" role="dialog" aria-modal="true" aria-labelledby="welcome-modal-title">
+        <div class="welcome-modal-content">
+            <div class="welcome-modal-header">
+                <h2 id="welcome-modal-title">Bienvenue sur la carte des bassins scolaires des écoles primaires de la région de Montréal</h2>
+                <button id="welcome-modal-close" class="welcome-modal-close" aria-label="Fermer l'aide">&times;</button>
+            </div>
+            <div class="welcome-modal-body">
+                <p>Cette carte vous aide à trouver le bassin scolaire d'une école primaire et ses indicateurs IMSE/SFR.</p>
+                <ol>
+                    <li>Utilisez <strong>Rechercher une école</strong> pour trouver rapidement un établissement.</li>
+                    <li>Utilisez <strong>Ajouter un marqueur</strong> pour voir le bassin associé à cet endroit.</li>
+                    <li>Cliquez sur <strong>Ma position</strong> pour centrer la carte sur votre emplacement actuel.</li>
+                    <li>Utilisez la loupe pour rechercher votre adresse.</li>
+                    <li>Consultez le panneau de droite pour les détails et les graphiques.</li>
+                    <li>Utilisez <strong>Créer un itinéraire</strong> pour ouvrir le trajet dans Google Maps.</li>
+                    <li>Pour plus d'informations, consultez les liens disponibles dans le panneau d'information.</li>
+                </ol>
+                <button id="welcome-modal-start" class="welcome-modal-start" type="button">Commencer</button>
+            </div>
+        </div>
+    </div>
+    <div id="school-search-modal" role="dialog" aria-modal="true" aria-labelledby="search-modal-title" aria-hidden="true">
+        <div class="search-modal-content" role="document">
+            <div class="search-modal-header">
+                <h3 id="search-modal-title">Rechercher une école</h3>
+                <button class="search-modal-close" aria-label="Fermer la recherche">&times;</button>
+            </div>
+            <div class="search-modal-body">
+                <label for="school-search-input" class="sr-only">Nom de l'école</label>
+                <input type="text" id="school-search-input" placeholder="Tapez le nom d'une école..." autocomplete="off">
+                <ul class="search-results" id="search-results" aria-live="polite"></ul>
+            </div>
+        </div>
+    </div>
+    <aside id="info-panel" class="info-panel" role="complementary" aria-labelledby="info-panel-title">
+        <div class="panel-header">
+            <h3 id="info-panel-title">Informations</h3>
+            <button id="close-panel" aria-label="Fermer le panneau d'information">&times;</button>
+        </div>
+        <div id="panel-content" tabindex="-1">
+            <div id="school-info" aria-live="polite"></div>
+            <h4>Rang Décile IMSE</h4>
+            <div class="chart-container">
+                <canvas id="imse-chart" aria-label="Graphique des rangs déciles IMSE" role="img"></canvas>
+            </div>
+            <p id="imse-explanation" class="chart-explanation"></p>
+            <div class="chart-gradient-legend" aria-label="Légende du dégradé IMSE">
+                <span class="legend-label">Décile faible</span>
+                <span class="legend-bar imse-gradient" aria-hidden="true"></span>
+                <span class="legend-label">Décile élevé</span>
+            </div>
+            <h4>Rang Décile SFR</h4>
+            <div class="chart-container">
+                <canvas id="sfr-chart" aria-label="Graphique des rangs déciles SFR" role="img"></canvas>
+            </div>
+            <p id="sfr-explanation" class="chart-explanation"></p>
+            <div class="chart-gradient-legend" aria-label="Légende du dégradé SFR">
+                <span class="legend-label">Décile faible</span>
+                <span class="legend-bar sfr-gradient" aria-hidden="true"></span>
+                <span class="legend-label">Décile élevé</span>
+            </div>
+        </div>
+    </aside>
+    <button id="info-panel-tab" class="info-panel-tab" type="button" aria-label="Ouvrir le panneau d'information" aria-controls="info-panel" aria-expanded="false">Informations</button>
+    
+    <!-- Titre de la carte -->
+    <div id="map-title" class="map-title">Bassins scolaires des écoles primaires de la région de Montréal</div>
+    </main>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+    <script src='https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js'></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol/dist/L.Control.Locate.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <script src="./js/main.js"></script>
+</body>
+</html>
