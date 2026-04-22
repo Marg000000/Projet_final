@@ -56,9 +56,9 @@ body {
 
 .theme-toggle {
     position: fixed;
-    left: 12px;
-    bottom: calc(var(--bottom-title-height) + 32px);
-    z-index: 1500;
+    right: 12px;
+    bottom: 10px;
+    z-index: 11000;
     border: 1px solid var(--ui-border);
     border-radius: 999px;
     background: linear-gradient(180deg, #edf5fa 0%, #dce9f2 100%);
@@ -584,6 +584,94 @@ h4 {
     border-color: var(--ui-accent) !important;
 }
 
+.leaflet-control-layer-toggle {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+}
+
+.layer-toggle-dropdown {
+    margin: 0;
+    min-width: 200px;
+    width: 200px;
+}
+
+.layer-toggle-summary {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-width: 200px;
+    width: 200px;
+    height: 34px;
+    line-height: 34px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ui-ink);
+    padding: 0 10px;
+    box-sizing: border-box;
+    border: 1px solid #cfd8df;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.9);
+    cursor: pointer;
+    user-select: none;
+}
+
+.layer-toggle-summary::-webkit-details-marker {
+    display: none;
+}
+
+.layer-toggle-summary::after {
+    content: '▾';
+    font-size: 12px;
+    color: #5f6f79;
+}
+
+.layer-toggle-dropdown[open] .layer-toggle-summary::after {
+    content: '▴';
+}
+
+.layer-toggle-summary:hover,
+.layer-toggle-dropdown[open] .layer-toggle-summary {
+    background: #e8f1f8;
+    border-color: var(--ui-accent);
+}
+
+.layer-toggle-menu {
+    margin-top: 6px;
+    padding: 8px;
+    border: 1px solid #cfd8df;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.94);
+}
+
+.layer-toggle-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ui-ink);
+    margin: 0 0 8px;
+}
+
+.layer-toggle-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--ui-ink);
+    margin-bottom: 6px;
+    cursor: pointer;
+}
+
+.layer-toggle-option:last-child {
+    margin-bottom: 0;
+}
+
+.layer-toggle-option input {
+    margin: 0;
+    accent-color: var(--ui-accent-strong);
+}
+
 /* Modal de recherche d'école */
 #school-search-modal {
     display: none;
@@ -671,6 +759,20 @@ h4 {
     padding: 0;
     flex: 1;
     overflow-y: auto;
+}
+
+.search-group-header {
+    margin: 10px 0 6px;
+    padding: 4px 2px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #516674;
+    border-bottom: 1px solid #d6e0e7;
+}
+
+.search-group-header:first-child {
+    margin-top: 0;
 }
 
 .search-result-item {
@@ -861,6 +963,9 @@ body.dark-mode .welcome-modal-header {
 body.dark-mode .panel-header h3,
 body.dark-mode .map-title,
 body.dark-mode .welcome-modal-header h2,
+body.dark-mode .welcome-modal-body,
+body.dark-mode .welcome-modal-body p,
+body.dark-mode .welcome-modal-body li,
 body.dark-mode .search-modal-header h3,
 body.dark-mode .chart-explanation,
 body.dark-mode h4,
@@ -868,6 +973,7 @@ body.dark-mode .legend-label,
 body.dark-mode .info-panel-message,
 body.dark-mode .accordion-content p,
 body.dark-mode details.accordion-item summary,
+body.dark-mode .search-group-header,
 body.dark-mode .search-no-results {
     color: #d5e1ea;
 }
@@ -902,6 +1008,59 @@ body.dark-mode .leaflet-control-geocoder input {
 
 body.dark-mode .leaflet-control-locate a::after {
     color: #d9e6ef;
+}
+
+body.dark-mode .leaflet-control-locate a span,
+body.dark-mode .leaflet-control-locate a .leaflet-control-locate-location-arrow,
+body.dark-mode .leaflet-control-locate a .leaflet-control-locate-spinner {
+    color: #d9e6ef !important;
+    border-top-color: #d9e6ef !important;
+    border-bottom-color: #d9e6ef !important;
+}
+
+body.dark-mode .leaflet-control-locate a .leaflet-control-locate-location-arrow::before,
+body.dark-mode .leaflet-control-locate a .leaflet-control-locate-location-arrow::after,
+body.dark-mode .leaflet-control-locate a i,
+body.dark-mode .leaflet-control-locate a i::before,
+body.dark-mode .leaflet-control-locate a svg,
+body.dark-mode .leaflet-control-locate a svg path {
+    color: #d9e6ef !important;
+    fill: #d9e6ef !important;
+    stroke: #d9e6ef !important;
+}
+
+body.dark-mode .leaflet-control-locate a .leaflet-control-locate-location-arrow {
+    filter: brightness(1.8) saturate(0.7) !important;
+}
+
+body.dark-mode .layer-toggle-title,
+body.dark-mode .layer-toggle-summary,
+body.dark-mode .layer-toggle-option {
+    color: #d9e6ef;
+}
+
+body.dark-mode .layer-toggle-summary {
+    background: rgba(22, 35, 46, 0.95);
+    border-color: #355368;
+}
+
+body.dark-mode .layer-toggle-summary::after {
+    color: #9ec4e3;
+}
+
+body.dark-mode .layer-toggle-summary:hover,
+body.dark-mode .layer-toggle-dropdown[open] .layer-toggle-summary {
+    background: #213849;
+    border-color: #4f7593;
+}
+
+body.dark-mode .layer-toggle-menu {
+    border-color: #355368;
+    background: rgba(22, 35, 46, 0.95);
+}
+
+body.dark-mode .search-group-header {
+    border-bottom-color: #355368;
 }
 
 body.dark-mode .leaflet-control-search-school a:hover,

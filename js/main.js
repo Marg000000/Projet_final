@@ -4,7 +4,7 @@ console.log('Map initialized');
 
 const LIGHT_TILE_URL = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
 const DARK_TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-const THEME_STORAGE_KEY = 'bassins-theme';
+const systemThemeMediaQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
 const tileLayer = L.tileLayer(LIGHT_TILE_URL, {
     attribution: '© CartoDB, OpenStreetMap, Marguerite Burton, Données Québec, <a href="https://www.quebec.ca/education/indicateurs-statistiques/prescolaire-primaire-secondaire/indices-defavorisation" target="_blank" rel="noopener noreferrer">Ministère de l\'Éducation du Québec</a>',
@@ -32,9 +32,8 @@ function applyTheme(theme) {
 }
 
 function initializeTheme() {
-    const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
-    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-    const initialTheme = storedTheme || (prefersDark ? 'dark' : 'light');
+    const prefersDark = systemThemeMediaQuery ? systemThemeMediaQuery.matches : false;
+    const initialTheme = prefersDark ? 'dark' : 'light';
     applyTheme(initialTheme);
 }
 
@@ -112,6 +111,8 @@ let selectedSchoolPointsLayer = null;
 let csAngLayers = [];
 let csFragLayers = [];
 let activeCommissionLayers = [];
+let frenchSchoolsPointsLayer = null;
+let englishSchoolsPointsLayer = null;
 let imseGradientPreviewActive = false;
 let sfrGradientPreviewActive = false;
 const SCHOOL_POINT_DEFAULT_RADIUS = 6;
@@ -121,12 +122,30 @@ let sfrCounts = new Array(11).fill(0);
 let imseChart = null;
 let sfrChart = null;
 let lastFocusedElement = null;
+const layerVisibilityState = {
+    showFrenchSchools: false,
+    showEnglishSchools: false,
+    showFrenchBoards: false,
+    showEnglishBoards: false
+};
 
 const schoolPointColors = {
     FR: '#1f78b4',
     EN: '#e31a1c',
     OTHER: '#6c757d'
 };
+
+function getFeatureIdentityKey(feature) {
+    if (!feature) return '';
+
+    const props = feature.properties || {};
+    const featureId = String(feature.id || '').trim();
+    const objectId = String(props.OBJECTID1 || props.OBJECTID || props.ObjectId || props.OBJECTID_1 || '').trim();
+    const languageCode = getLanguageCode(props);
+    const schoolName = normalizeSchoolNameForMatching(getPolygonSchoolName(feature));
+
+    return [featureId, objectId, languageCode, schoolName].join('|');
+}
 
 const defaultPolygonStyle = {
     color: 'blue',
@@ -256,21 +275,28 @@ const csAngStyle = {
     color: '#f0a8a8',
     weight: 2,
     opacity: 0.9,
-    fill: false
+    fill: true,
+    fillOpacity: 0.01
 };
 
 const csFraStyle = {
     color: '#8bb8e0',
     weight: 2,
     opacity: 0.9,
-    fill: false
+    fill: true,
+    fillOpacity: 0.01
 };
 
 function getCommissionScolaireNameFromProperties(props) {
     if (!props) return '';
     const raw = props.Nom_Cs || props.Nom_cs || props.NOM_CS || props.Nom_CS || props.NomCs || '';
-    // Strip trailing code like " (762000)" for clean display
-    return raw ? raw.replace(/\s*\(\d+\)\s*$/, '').trim() : '';
+    if (!raw) return '';
+
+    // Strip trailing numeric code(s) like "(762000)", "- 762000", or repeated variants.
+    return String(raw)
+        .replace(/(?:\s*[\-–:]?\s*\(\d{3,}\)\s*)+$/g, '')
+        .replace(/\s*[\-–:]?\s*\d{3,}\s*$/g, '')
+        .trim();
 }
 
 function getCommissionScolaireWebsiteFromProperties(props) {
@@ -510,6 +536,39 @@ function hideCommissionLayers() {
     activeCommissionLayers = [];
 }
 
+function syncSchoolLayersVisibility() {
+    const syncLayer = (layer, shouldShow) => {
+        if (!layer) return;
+        if (shouldShow) {
+            if (!map.hasLayer(layer)) {
+                layer.addTo(map);
+            }
+        } else if (map.hasLayer(layer)) {
+            map.removeLayer(layer);
+        }
+    };
+
+    syncLayer(frenchSchoolsPointsLayer, layerVisibilityState.showFrenchSchools);
+    syncLayer(englishSchoolsPointsLayer, layerVisibilityState.showEnglishSchools);
+}
+
+function syncCommissionLayersVisibility() {
+    const syncLayerGroup = (layers, shouldShow) => {
+        layers.forEach(layer => {
+            if (shouldShow) {
+                if (!map.hasLayer(layer)) {
+                    layer.addTo(map);
+                }
+            } else if (map.hasLayer(layer)) {
+                map.removeLayer(layer);
+            }
+        });
+    };
+
+    syncLayerGroup(csFragLayers, layerVisibilityState.showFrenchBoards);
+    syncLayerGroup(csAngLayers, layerVisibilityState.showEnglishBoards);
+}
+
 function showCommissionLayersForFeature(feature) {
     hideCommissionLayers();
     if (!feature || !feature.geometry) return;
@@ -554,35 +613,53 @@ function buildSelectedSchoolPointsLayer(selectedPolygons) {
         return null;
     }
 
-    const selectedPolygonNames = selectedPolygons
-        .map(getPolygonSchoolName)
-        .filter(Boolean);
+    const selectedPolygonDescriptors = selectedPolygons.map(polygonFeature => ({
+        feature: polygonFeature,
+        languageCode: getLanguageCode((polygonFeature && polygonFeature.properties) ? polygonFeature.properties : {}),
+        schoolName: normalizeSchoolNameForMatching(getPolygonSchoolName(polygonFeature))
+    }));
 
-    const selectedSchoolFeatures = ecolesPrimaireGeoJSON.features.filter(schoolFeature => {
+    const getMatchingDescriptorsForSchool = (schoolFeature) => {
+        const schoolLanguage = getLanguageCode(schoolFeature.properties);
+        return selectedPolygonDescriptors.filter(descriptor => {
+            if (schoolLanguage !== descriptor.languageCode) {
+                return false;
+            }
+            return turf.booleanPointInPolygon(schoolFeature, descriptor.feature);
+        });
+    };
+
+    const strictMatches = ecolesPrimaireGeoJSON.features.filter(schoolFeature => {
         if (!schoolFeature || !schoolFeature.geometry || schoolFeature.geometry.type !== 'Point') {
             return false;
         }
 
-        const schoolLanguage = getLanguageCode(schoolFeature.properties);
-        const schoolName = getSchoolNameFromFeature(schoolFeature);
+        const schoolName = normalizeSchoolNameForMatching(getSchoolNameFromFeature(schoolFeature));
+        const matchingPolygonDescriptors = getMatchingDescriptorsForSchool(schoolFeature);
 
-        const matchingPolygons = selectedPolygons.filter(polygonFeature => {
-            const polygonLanguage = getLanguageCode((polygonFeature && polygonFeature.properties) ? polygonFeature.properties : {});
-            if (schoolLanguage !== polygonLanguage) {
-                return false;
-            }
-            return turf.booleanPointInPolygon(schoolFeature, polygonFeature);
-        });
-
-        if (matchingPolygons.length === 0) {
+        if (matchingPolygonDescriptors.length === 0) {
             return false;
         }
 
-        return matchingPolygons.some(polygonFeature => {
-            const polygonName = getPolygonSchoolName(polygonFeature);
-            return hasPartialNameMatch(schoolName, polygonName);
-        }) || selectedPolygonNames.some(polygonName => hasPartialNameMatch(schoolName, polygonName));
+        return matchingPolygonDescriptors.some(descriptor => descriptor.schoolName && descriptor.schoolName === schoolName);
     });
+
+    const selectedSchoolFeatures = strictMatches.length > 0
+        ? strictMatches
+        : ecolesPrimaireGeoJSON.features.filter(schoolFeature => {
+            if (!schoolFeature || !schoolFeature.geometry || schoolFeature.geometry.type !== 'Point') {
+                return false;
+            }
+
+            const schoolName = normalizeSchoolNameForMatching(getSchoolNameFromFeature(schoolFeature));
+            const matchingPolygonDescriptors = getMatchingDescriptorsForSchool(schoolFeature);
+            if (matchingPolygonDescriptors.length === 0) {
+                return false;
+            }
+
+            // Fallback for legacy datasets where names still differ.
+            return matchingPolygonDescriptors.some(descriptor => hasPartialNameMatch(schoolName, descriptor.schoolName));
+        });
 
     return L.geoJSON(selectedSchoolFeatures, {
         pointToLayer: function(feature, latlng) {
@@ -598,25 +675,29 @@ function buildSelectedSchoolPointsLayer(selectedPolygons) {
         },
         onEachFeature: function(feature, layer) {
             const schoolName = getSchoolNameFromFeature(feature);
-            const languageCode = getLanguageCode(feature.properties);
-            const languageLabel = languageCode === 'FR' ? 'Français' : (languageCode === 'EN' ? 'Anglais' : 'Autre');
-            layer.bindPopup(`<strong>${schoolName}</strong><br>Langue: ${languageLabel}`);
+            layer.bindPopup(`<strong>${schoolName}</strong>`);
+            layer.bindTooltip(schoolName, {
+                direction: 'top',
+                offset: [0, -6],
+                sticky: true
+            });
+            layer.on('click', function() {
+                selectSchool(feature);
+            });
         }
     });
 }
 
 function showSelectedPolygons(features) {
     hideSelectedPolygons();
-    hideCommissionLayers();
     features.forEach(feature => {
-        const key = getPolygonSchoolName(feature);
+        const key = getFeatureIdentityKey(feature);
         const layer = polygonLayers.get(key);
         if (layer) {
             layer.setStyle(getPolygonStyleForFeature(feature, true));
             layer.addTo(map);
             layer.bringToFront();
             selectedPolygonLayers.push(layer);
-            showCommissionLayersForFeature(feature);
         }
     });
 
@@ -869,7 +950,6 @@ function setInfoPanelOpen(isOpen) {
 function hideInfo() {
     setInfoPanelOpen(false);
     hideSelectedPolygons();
-    hideCommissionLayers();
     syncHighlightedSchoolPointsFromPanel();
 
     const infoPanelTab = document.getElementById('info-panel-tab');
@@ -951,6 +1031,51 @@ const AddMarkerControl = L.Control.extend({
 });
 
 map.addControl(new AddMarkerControl());
+
+const LayerVisibilityControl = L.Control.extend({
+    options: {
+        position: 'topleft'
+    },
+    onAdd: function() {
+        const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control leaflet-control-layer-toggle');
+
+        container.innerHTML = `
+            <details class="layer-toggle-dropdown">
+                <summary class="layer-toggle-summary">🗂️ Afficher des couches</summary>
+                <div class="layer-toggle-menu">
+                    <label class="layer-toggle-option"><input type="checkbox" data-layer-toggle="showFrenchSchools"> Écoles FR</label>
+                    <label class="layer-toggle-option"><input type="checkbox" data-layer-toggle="showEnglishSchools"> Écoles EN</label>
+                    <label class="layer-toggle-option"><input type="checkbox" data-layer-toggle="showFrenchBoards"> Centres de services scolaires FR</label>
+                    <label class="layer-toggle-option"><input type="checkbox" data-layer-toggle="showEnglishBoards"> School boards EN</label>
+                </div>
+            </details>
+        `;
+
+        const syncUI = () => {
+            container.querySelectorAll('input[data-layer-toggle]').forEach(input => {
+                const key = input.dataset.layerToggle;
+                input.checked = !!layerVisibilityState[key];
+            });
+        };
+
+        container.querySelectorAll('input[data-layer-toggle]').forEach(input => {
+            input.addEventListener('change', function() {
+                const key = this.dataset.layerToggle;
+                layerVisibilityState[key] = this.checked;
+                syncSchoolLayersVisibility();
+                syncCommissionLayersVisibility();
+                syncUI();
+            });
+        });
+
+        syncUI();
+
+        L.DomEvent.disableClickPropagation(container);
+        L.DomEvent.disableScrollPropagation(container);
+
+        return container;
+    }
+});
 
 function openItineraryToActiveMarker() {
     if (!activeMarker) {
@@ -1113,6 +1238,11 @@ function normalizeSearchText(value) {
         .trim();
 }
 
+function normalizeSchoolNameForMatching(value) {
+    const withoutCode = String(value || '').replace(/\s*\(\d+\)\s*$/, '').trim();
+    return normalizeSearchText(withoutCode);
+}
+
 function escapeHtmlAttribute(value) {
     return String(value || '')
         .replace(/&/g, '&amp;')
@@ -1132,7 +1262,7 @@ function syncHighlightedSchoolPointsFromPanel() {
         : [];
 
     const openSchools = openItems.map(item => ({
-        name: item.dataset.schoolName || '',
+        name: normalizeSchoolNameForMatching(item.dataset.schoolName || ''),
         language: item.dataset.schoolLanguage || 'OTHER'
     }));
 
@@ -1141,14 +1271,14 @@ function syncHighlightedSchoolPointsFromPanel() {
             return;
         }
 
-        const schoolName = getSchoolNameFromFeature(layer.feature);
+        const schoolName = normalizeSchoolNameForMatching(getSchoolNameFromFeature(layer.feature));
         const schoolLanguage = getLanguageCode(layer.feature.properties || {});
 
         const isHighlighted = openSchools.some(openSchool => {
             if (openSchool.language !== 'OTHER' && openSchool.language !== schoolLanguage) {
                 return false;
             }
-            return hasPartialNameMatch(schoolName, openSchool.name);
+            return schoolName === openSchool.name;
         });
 
         layer.setStyle({
@@ -1215,17 +1345,52 @@ function updateSearchResults(query) {
         return;
     }
 
+    const groupedMatches = new Map();
     matches.forEach(feature => {
-        const li = document.createElement('li');
-        li.className = 'search-result-item';
-        const schoolName = getSchoolNameFromFeature(feature);
-        li.innerHTML = `<button type="button" class="search-result-button"><strong>${schoolName}</strong></button>`;
-        const button = li.querySelector('.search-result-button');
-        button.addEventListener('click', function() {
-            selectSchool(feature);
-            closeSearchModal();
+        const props = (feature && feature.properties) ? feature.properties : {};
+        const boardName = getCommissionScolaireNameFromProperties(props) || 'Centre de services scolaire non précisé';
+        if (!groupedMatches.has(boardName)) {
+            groupedMatches.set(boardName, []);
+        }
+        groupedMatches.get(boardName).push(feature);
+    });
+
+    const sortedBoardNames = Array.from(groupedMatches.keys()).sort((a, b) =>
+        normalizeSearchText(a).localeCompare(normalizeSearchText(b), 'fr')
+    );
+
+    sortedBoardNames.forEach(boardName => {
+        const header = document.createElement('li');
+        header.className = 'search-group-header';
+        header.textContent = boardName;
+        resultsList.appendChild(header);
+
+        const features = groupedMatches.get(boardName);
+        features.sort((a, b) =>
+            normalizeSearchText(getSchoolNameFromFeature(a)).localeCompare(normalizeSearchText(getSchoolNameFromFeature(b)), 'fr')
+        );
+
+        features.forEach(feature => {
+            const li = document.createElement('li');
+            li.className = 'search-result-item';
+            const schoolName = getSchoolNameFromFeature(feature);
+
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'search-result-button';
+
+            const strong = document.createElement('strong');
+            strong.textContent = schoolName;
+            button.appendChild(strong);
+
+            button.addEventListener('click', function() {
+                selectSchool(feature);
+                closeSearchModal();
+            });
+
+            li.appendChild(button);
+            resultsList.appendChild(li);
         });
-        resultsList.appendChild(li);
     });
 }
 
@@ -1250,9 +1415,9 @@ function selectSchool(feature) {
         return;
     }
 
-    const targetName = normalizeSearchText(schoolName);
+    const targetName = normalizeSchoolNameForMatching(schoolName);
     let matches = donneesGeoJSON.features.filter(polyFeature =>
-        normalizeSearchText(getPolygonSchoolName(polyFeature)) === targetName
+        normalizeSchoolNameForMatching(getPolygonSchoolName(polyFeature)) === targetName
     );
 
     // Repli spatial si le jumelage par nom échoue
@@ -1295,6 +1460,7 @@ const SearchSchoolControl = L.Control.extend({
 
 map.addControl(new SearchSchoolControl());
 map.addControl(new ItineraryControl());
+map.addControl(new LayerVisibilityControl());
 console.log('Search school control added');
 
 // Gestion des événements de la modal
@@ -1312,8 +1478,20 @@ window.addEventListener('DOMContentLoaded', function() {
             const isDarkNow = document.body.classList.contains('dark-mode');
             const nextTheme = isDarkNow ? 'light' : 'dark';
             applyTheme(nextTheme);
-            localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
         });
+    }
+
+    if (systemThemeMediaQuery) {
+        const handleSystemThemeChange = function(event) {
+            applyTheme(event.matches ? 'dark' : 'light');
+        };
+
+        if (typeof systemThemeMediaQuery.addEventListener === 'function') {
+            systemThemeMediaQuery.addEventListener('change', handleSystemThemeChange);
+        } else if (typeof systemThemeMediaQuery.addListener === 'function') {
+            // Legacy fallback for older browsers.
+            systemThemeMediaQuery.addListener(handleSystemThemeChange);
+        }
     }
 
     if (welcomeModal) {
@@ -1469,7 +1647,7 @@ Promise.all([
                 return getPolygonStyleForFeature(feature, false);
             },
             onEachFeature: function(feature, layer) {
-                const key = getPolygonSchoolName(feature);
+                const key = getFeatureIdentityKey(feature);
                 polygonLayers.set(key, layer);
                 layer.on('click', function() {
                     showSelectedPolygon(feature);
@@ -1477,6 +1655,8 @@ Promise.all([
                 });
             }
         });
+
+        syncSchoolLayersVisibility();
     })
     .catch(erreur => {
         console.error("Erreur de chargement des données:", erreur);
@@ -1494,6 +1674,44 @@ fetch('./data/Ecole_primaire.geojson')
         console.log('Ecole_primaire loaded successfully:', data.features.length, 'features');
         ecolesPrimaireGeoJSON = data;
         buildCommissionLookupFromEcolesPrimaire();
+
+        const createSchoolPointsLayer = (languageCode) => {
+            const features = (ecolesPrimaireGeoJSON.features || []).filter(feature => {
+                if (!feature || !feature.geometry || feature.geometry.type !== 'Point') {
+                    return false;
+                }
+                return getLanguageCode(feature.properties || {}) === languageCode;
+            });
+
+            return L.geoJSON(features, {
+                pointToLayer: function(feature, latlng) {
+                    return L.circleMarker(latlng, {
+                        radius: SCHOOL_POINT_DEFAULT_RADIUS,
+                        fillColor: schoolPointColors[languageCode] || schoolPointColors.OTHER,
+                        color: '#ffffff',
+                        weight: 1,
+                        opacity: 1,
+                        fillOpacity: 0.9
+                    });
+                },
+                onEachFeature: function(feature, layer) {
+                    const schoolName = getSchoolNameFromFeature(feature);
+                    layer.bindPopup(`<strong>${schoolName}</strong>`);
+                    layer.bindTooltip(schoolName, {
+                        direction: 'top',
+                        offset: [0, -6],
+                        sticky: true
+                    });
+                    layer.on('click', function() {
+                        selectSchool(feature);
+                    });
+                }
+            });
+        };
+
+        frenchSchoolsPointsLayer = createSchoolPointsLayer('FR');
+        englishSchoolsPointsLayer = createSchoolPointsLayer('EN');
+        syncSchoolLayersVisibility();
 
         if (selectedPolygonLayers.length > 0) {
             const selectedFeatures = selectedPolygonLayers
@@ -1522,11 +1740,14 @@ fetch('./data/CS_ANG_data.geojson')
         csAngGeoJSON = data;
         const angLayer = L.geoJSON(data, {
             style: csAngStyle,
-            interactive: false
+            interactive: true
         });
         angLayer.eachLayer(layer => {
+            const boardName = getCommissionScolaireNameFromProperties((layer.feature && layer.feature.properties) ? layer.feature.properties : {});
+            layer.bindPopup(`<strong>${boardName || 'School board'}</strong>`);
             csAngLayers.push(layer);
         });
+        syncCommissionLayersVisibility();
         console.log('CS_ANG_data loaded successfully:', data.features.length, 'features');
     })
     .catch(erreur => {
@@ -1544,11 +1765,14 @@ fetch('./data/CS_FRA_data.geojson')
         csFraGeoJSON = data;
         const fraLayer = L.geoJSON(data, {
             style: csFraStyle,
-            interactive: false
+            interactive: true
         });
         fraLayer.eachLayer(layer => {
+            const boardName = getCommissionScolaireNameFromProperties((layer.feature && layer.feature.properties) ? layer.feature.properties : {});
+            layer.bindPopup(`<strong>${boardName || 'Centre de services scolaire'}</strong>`);
             csFragLayers.push(layer);
         });
+        syncCommissionLayersVisibility();
         console.log('CS_FRA_data loaded successfully:', data.features.length, 'features');
     })
     .catch(erreur => {
